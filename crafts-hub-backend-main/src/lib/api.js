@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const BASE_URL = import.meta.env.VITE_API_URL || "https://crafts-hub-backend.vercel.app/api";
 
 const getToken = () => localStorage.getItem("crafts_token");
 
@@ -61,7 +61,7 @@ export const productsAPI = {
   create: (formData) =>
     fetch(`${BASE_URL}/products`, {
       method: "POST",
-      headers: headers(true), // no Content-Type for FormData
+      headers: headers(true),
       body: formData,
     }).then(handleResponse),
 
