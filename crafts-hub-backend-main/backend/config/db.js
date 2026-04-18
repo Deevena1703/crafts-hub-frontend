@@ -15,7 +15,7 @@ const connectDB = async () => {
       serverSelectionTimeoutMS: 10000,
     });
     isConnected = true;
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    console.log(`✅ MongoDB Connected: ${conn.connection.name}`);
   } catch (error) {
     console.error("❌ MongoDB connection error:", error.message);
     throw error; // let the request fail with 500, don't kill the process
