@@ -5,17 +5,8 @@ const connectDB = require("./config/db");
 const app = express();
 
 const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow: no origin (curl/Postman), localhost, any *.vercel.app subdomain
-    if (!origin) return callback(null, true);
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) return callback(null, true);
-    if (/\.vercel\.app$/.test(origin)) return callback(null, true);
-    if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) return callback(null, true);
-    // Permissive during dev — log and allow
-    console.warn('CORS: allowing unknown origin:', origin);
-    callback(null, true);
-  },
-  credentials: true,
+  origin: "*",
+  credentials: false,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
