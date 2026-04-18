@@ -1,9 +1,9 @@
 const mongoose = require("mongoose");
 
-let isConnected = false;
-
 const connectDB = async () => {
-  if (isConnected) return;
+  // Use mongoose's own readyState instead of a custom flag
+  // 1 = connected, 2 = connecting
+  if (mongoose.connection.readyState >= 1) return;
 
   if (!process.env.MONGODB_URI) {
     throw new Error("MONGODB_URI environment variable is not set");
@@ -15,7 +15,6 @@ const connectDB = async () => {
     maxPoolSize: 10,
   });
 
-  isConnected = true;
   console.log(`✅ MongoDB Connected: ${conn.connection.name}`);
 };
 
