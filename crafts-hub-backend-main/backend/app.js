@@ -4,18 +4,16 @@ const connectDB = require("./config/db");
 
 const app = express();
 
-const allowedOrigins = [
-  "https://crafts-hub-frontend.vercel.app",  // hardcoded — no env var risk
-  process.env.CLIENT_URL,                    // still supports custom overrides
-  "http://localhost:5173",
-  "http://localhost:3000",
-].filter(Boolean);
-
 const corsOptions = {
   origin: (origin, callback) => {
+    // Allow: no origin (curl/Postman), localhost, any *.vercel.app subdomain
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error(`CORS: origin ${origin} not allowed`));
+    if (origin.includes('localhost') || origin.includes('127.0.0.1')) return callback(null, true);
+    if (/\.vercel\.app$/.test(origin)) return callback(null, true);
+    if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL) return callback(null, true);
+    // Permissive during dev — log and allow
+    console.warn('CORS: allowing unknown origin:', origin);
+    callback(null, true);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
