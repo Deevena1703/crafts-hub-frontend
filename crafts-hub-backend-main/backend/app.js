@@ -11,32 +11,39 @@ const allowedOrigins = [
   "http://localhost:3000",
 ].filter(Boolean);
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (Postman, curl, mobile apps)
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      callback(new Error(`CORS: origin ${origin} not allowed`));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
-// Handle pre-flight OPTIONS for every route
-app.options("*", cors());
+app.use(cors(corsOptions));
+
+// Respond to ALL pre-flight OPTIONS requests immediately — no DB needed.
+// This must be before the dbConnect middleware so preflight never times out.
+app.options("*", cors(corsOptions));
 
 // ─── BODY PARSERS ────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// ─── DB CONNECTION ───────────────────────────────────────────────────────────
-// Called once per cold start; the isConnected guard in config/db.js prevents
-// re-connecting on warm Vercel invocations.
-connectDB().catch((err) => {
-  console.error("Failed to connect to MongoDB:", err.message);
+// ─── DB MIDDLEWARE ───────────────────────────────────────────────────────────
+// Connect to MongoDB per-request instead of at module load.
+// The isConnected guard in config/db.js makes this a no-op on warm invocations.
+// Skipped automatically for OPTIONS requests (handled above).
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error("DB connection failed:", err.message);
+    res.status(503).json({ message: "Database unavailable. Please try again." });
+  }
 });
 
 // ─── ROUTES ──────────────────────────────────────────────────────────────────
@@ -53,7 +60,6 @@ app.use((_req, res) => {
 });
 
 // ─── GLOBAL ERROR HANDLER ────────────────────────────────────────────────────
-// Catches errors forwarded via next(err), including multer file-size/type errors.
 // Must have exactly 4 parameters so Express treats it as an error handler.
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
