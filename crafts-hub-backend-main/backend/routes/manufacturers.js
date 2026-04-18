@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const Product = require("../models/Product");
 
@@ -16,8 +17,13 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/manufacturers/:id — single manufacturer + their products
+// GET /api/manufacturers/:id — single manufacturer + their products (public)
 router.get("/:id", async (req, res) => {
+  // Validate ObjectId before hitting MongoDB to prevent CastError crashes
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid manufacturer ID format" });
+  }
+
   try {
     const manufacturer = await User.findOne({
       _id: req.params.id,

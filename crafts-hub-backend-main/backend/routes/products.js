@@ -1,20 +1,37 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const Product = require("../models/Product");
 const { protect, requireRole } = require("../middleware/auth");
 const { upload, toBase64 } = require("../middleware/upload");
 
 const router = express.Router();
 
-// ─── PUBLIC ROUTES ─────────────────────────────────────────────────────────
+// ─── HELPER ──────────────────────────────────────────────────────────────────
+// Validates a MongoDB ObjectId and returns a 400 response if invalid.
+// Prevents CastError crashes when someone passes a non-ObjectId string.
+const validateObjectId = (id, res) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    res.status(400).json({ message: "Invalid ID format" });
+    return false;
+  }
+  return true;
+};
 
-// GET /api/products — all products (with filter/search)
+// ─── PUBLIC ROUTES ───────────────────────────────────────────────────────────
+
+// GET /api/products — all products (with filter/search/pagination)
 router.get("/", async (req, res) => {
   try {
     const { category, search, manufacturerId, page = 1, limit = 50 } = req.query;
     const query = {};
 
     if (category && category !== "all") query.category = category;
-    if (manufacturerId) query.manufacturer = manufacturerId;
+    if (manufacturerId) {
+      if (!mongoose.Types.ObjectId.isValid(manufacturerId)) {
+        return res.status(400).json({ message: "Invalid manufacturerId format" });
+      }
+      query.manufacturer = manufacturerId;
+    }
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: "i" } },
@@ -40,23 +57,11 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/products/:id — single product
-router.get("/:id", async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id).populate(
-      "manufacturer",
-      "name groupName location bio avatarUrl"
-    );
-    if (!product) return res.status(404).json({ message: "Product not found" });
-    res.json({ product });
-  } catch (err) {
-    res.status(500).json({ message: "Error fetching product" });
-  }
-});
+// ─── MANUFACTURER ONLY ROUTES ─────────────────────────────────────────────────
+// IMPORTANT: These specific string routes MUST come before /:id so Express
+// doesn't match "my" as an ObjectId and throw a CastError.
 
-// ─── MANUFACTURER ONLY ROUTES ──────────────────────────────────────────────
-
-// GET /api/products/my/products — current manufacturer's products only
+// GET /api/products/my/products — current manufacturer's own products
 router.get("/my/products", protect, requireRole("manufacturer"), async (req, res) => {
   try {
     const products = await Product.find({ manufacturer: req.user._id }).sort({ createdAt: -1 });
@@ -66,7 +71,7 @@ router.get("/my/products", protect, requireRole("manufacturer"), async (req, res
   }
 });
 
-// POST /api/products — create product with photo/video upload
+// POST /api/products — create a new product (with photo/video upload)
 router.post(
   "/",
   protect,
@@ -75,22 +80,22 @@ router.post(
     { name: "photos", maxCount: 5 },
     { name: "video", maxCount: 1 },
   ]),
-  async (req, res) => {
+  async (req, res, next) => {
     try {
       const { name, description, price, category } = req.body;
       if (!name || !price || !category) {
         return res.status(400).json({ message: "name, price and category are required" });
       }
 
-      // Convert photos to base64
+      // Convert uploaded photos to base64 data-URIs
       const photoUploads = [];
       if (req.files?.photos) {
         for (const file of req.files.photos) {
-          photoUploads.push(toBase64(file));
+          photoUploads.push(toBase64(file)); // throws if file exceeds per-type limit
         }
       }
 
-      // Convert video to base64
+      // Convert uploaded video to base64 data-URI
       let videoUpload = null;
       if (req.files?.video?.[0]) {
         videoUpload = toBase64(req.files.video[0]);
@@ -109,13 +114,31 @@ router.post(
 
       res.status(201).json({ product });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ message: err.message || "Error creating product" });
+      // Forward toBase64 size errors and unexpected errors to global handler
+      next(err);
     }
   }
 );
 
-// PUT /api/products/:id — update product (full edit, manufacturer's own only)
+// ─── ROUTES WITH :id PARAM ────────────────────────────────────────────────────
+// These come AFTER all fixed-string routes to avoid shadowing them.
+
+// GET /api/products/:id — single product
+router.get("/:id", async (req, res) => {
+  if (!validateObjectId(req.params.id, res)) return;
+  try {
+    const product = await Product.findById(req.params.id).populate(
+      "manufacturer",
+      "name groupName location bio avatarUrl"
+    );
+    if (!product) return res.status(404).json({ message: "Product not found" });
+    res.json({ product });
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching product" });
+  }
+});
+
+// PUT /api/products/:id — update product (manufacturer's own only)
 router.put(
   "/:id",
   protect,
@@ -124,12 +147,13 @@ router.put(
     { name: "photos", maxCount: 5 },
     { name: "video", maxCount: 1 },
   ]),
-  async (req, res) => {
+  async (req, res, next) => {
+    if (!validateObjectId(req.params.id, res)) return;
     try {
       const product = await Product.findById(req.params.id);
       if (!product) return res.status(404).json({ message: "Product not found" });
 
-      // Ownership check — manufacturer can only edit THEIR OWN products
+      // Ownership check — manufacturers can only edit their own products
       if (product.manufacturer.toString() !== req.user._id.toString()) {
         return res.status(403).json({ message: "Not authorized to edit this product" });
       }
@@ -141,7 +165,7 @@ router.put(
       if (price) product.price = Number(price);
       if (category) product.category = category;
 
-      // Remove specific photos (no external deletion needed — just remove from array)
+      // Remove specific photos by ID
       if (removePhotoIds) {
         const idsToRemove = Array.isArray(removePhotoIds) ? removePhotoIds : [removePhotoIds];
         product.photos = product.photos.filter((p) => !idsToRemove.includes(p._id.toString()));
@@ -155,9 +179,7 @@ router.put(
       }
 
       // Remove video
-      if (removeVideo === "true") {
-        product.video = null;
-      }
+      if (removeVideo === "true") product.video = null;
 
       // Replace/add video as base64
       if (req.files?.video?.[0]) {
@@ -167,14 +189,14 @@ router.put(
       await product.save();
       res.json({ product });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ message: err.message || "Error updating product" });
+      next(err);
     }
   }
 );
 
 // DELETE /api/products/:id — delete product (manufacturer's own only)
 router.delete("/:id", protect, requireRole("manufacturer"), async (req, res) => {
+  if (!validateObjectId(req.params.id, res)) return;
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
@@ -183,7 +205,6 @@ router.delete("/:id", protect, requireRole("manufacturer"), async (req, res) => 
       return res.status(403).json({ message: "Not authorized to delete this product" });
     }
 
-    // No external storage to clean up — just delete the document
     await product.deleteOne();
     res.json({ message: "Product deleted successfully" });
   } catch (err) {
