@@ -11,16 +11,22 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
+// Handle CORS and OPTIONS preflight BEFORE anything else (including DB)
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+app.options("*", (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  res.status(204).end();
+});
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Health check — no DB needed, answers immediately
+// Health check — no DB needed
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
-// DB middleware — runs only for non-OPTIONS requests below this point
+// DB middleware — runs only for actual requests
 app.use(async (req, res, next) => {
   try {
     await connectDB();
@@ -43,7 +49,6 @@ app.use((err, _req, res, _next) => {
   console.error("Unhandled error:", err.message);
   if (err.name === "MulterError") return res.status(400).json({ message: `Upload error: ${err.message}` });
   if (err.message?.startsWith("Image") || err.message?.startsWith("Video")) return res.status(400).json({ message: err.message });
-  if (err.message?.startsWith("CORS")) return res.status(403).json({ message: err.message });
   res.status(err.status || 500).json({ message: err.message || "Internal server error" });
 });
 
